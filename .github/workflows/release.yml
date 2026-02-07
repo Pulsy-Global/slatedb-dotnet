@@ -1,0 +1,31 @@
+name: Release to NuGet
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: goto-bus-stop/setup-zig@v2
+      - run: cargo install cargo-zigbuild
+      - run: ./build-native.sh --all
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - run: dotnet build Pulsy.SlateDB.sln -c Release
+      - run: dotnet test Pulsy.SlateDB.sln -c Release
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - run: dotnet pack Pulsy.SlateDB/Pulsy.SlateDB.csproj -c Release -p:PackageVersion=${{ steps.version.outputs.VERSION }} -o ./artifacts
+
+      - run: dotnet nuget push ./artifacts/*.nupkg -k ${{ secrets.NUGET_API_KEY }} -s https://api.nuget.org/v3/index.json

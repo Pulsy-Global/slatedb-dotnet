@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <Version>0.0.0</Version>
+
+        <PackageId>Pulsy.SlateDB</PackageId>
+        <Description>SlateDB .NET bindings — embedded key-value storage powered by object storage</Description>
+        <Authors>Pulsy</Authors>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageProjectUrl>https://github.com/Pulsy-Global/slatedb-dotnet</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/Pulsy-Global/slatedb-dotnet</RepositoryUrl>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <IsPackable>true</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="../README.md" Pack="true" PackagePath="/" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="../runtimes/**/*">
+            <Pack>true</Pack>
+            <PackagePath>runtimes/%(RecursiveDir)</PackagePath>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>runtimes/%(RecursiveDir)%(FileName)%(Extension)</Link>
+        </None>
+    </ItemGroup>
+
+</Project>

@@ -1,0 +1,29 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+#
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pulsy.SlateDB", "Pulsy.SlateDB\Pulsy.SlateDB.csproj", "{722A23FA-14BC-4652-BA03-4044530575CD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pulsy.SlateDB.Tests", "Pulsy.SlateDB.Tests\Pulsy.SlateDB.Tests.csproj", "{5BC8A1F7-FC98-4AA0-844B-1024CB532ADB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pulsy.SlateDB.Example", "Pulsy.SlateDB.Example\Pulsy.SlateDB.Example.csproj", "{5F35C8D9-DF2C-49FE-83E5-70DCFCED2FEE}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{722A23FA-14BC-4652-BA03-4044530575CD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{722A23FA-14BC-4652-BA03-4044530575CD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{722A23FA-14BC-4652-BA03-4044530575CD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{722A23FA-14BC-4652-BA03-4044530575CD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5BC8A1F7-FC98-4AA0-844B-1024CB532ADB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5BC8A1F7-FC98-4AA0-844B-1024CB532ADB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5BC8A1F7-FC98-4AA0-844B-1024CB532ADB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5BC8A1F7-FC98-4AA0-844B-1024CB532ADB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5F35C8D9-DF2C-49FE-83E5-70DCFCED2FEE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5F35C8D9-DF2C-49FE-83E5-70DCFCED2FEE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5F35C8D9-DF2C-49FE-83E5-70DCFCED2FEE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5F35C8D9-DF2C-49FE-83E5-70DCFCED2FEE}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
