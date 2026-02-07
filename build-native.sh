@@ -99,6 +99,20 @@ for i in "${!RIDS[@]}"; do
         continue
     fi
 
+    # macOS targets require a macOS host (no SDK available on Linux)
+    case "$RID" in
+        osx-*)
+            if [ "$(uname -s)" != "Darwin" ]; then
+                echo "  Skipping $RID (requires macOS host)"
+                continue
+            fi ;;
+        linux-*|win-*)
+            if [ "$(uname -s)" = "Darwin" ]; then
+                echo "  Skipping $RID (built on Linux host)"
+                continue
+            fi ;;
+    esac
+
     echo ""
     echo "=== Building $RID ($TARGET) ==="
 

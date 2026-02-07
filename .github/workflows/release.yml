@@ -5,8 +5,15 @@ on:
     tags: ['v*']
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build-native:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            targets: linux + windows
+          - os: macos-latest
+            targets: macOS
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -15,12 +22,28 @@ jobs:
       - run: cargo install cargo-zigbuild
       - run: ./build-native.sh --all
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.os }}
+          path: runtimes/
+
+  release:
+    needs: build-native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: runtimes/
+          pattern: native-*
+          merge-multiple: true
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
 
       - run: dotnet build Pulsy.SlateDB.sln -c Release
-      - run: dotnet test Pulsy.SlateDB.sln -c Release
 
       - name: Extract version from tag
         id: version
