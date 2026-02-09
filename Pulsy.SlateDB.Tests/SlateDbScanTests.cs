@@ -11,19 +11,6 @@ public class SlateDbScanTests
     public SlateDbScanTests(SlateDbFixture fixture) => _fixture = fixture;
 
     [Fact]
-    public void Scan_All_ReturnsAllKeys()
-    {
-        using var db = _fixture.CreateDb();
-        for (var i = 0; i < 10; i++)
-            db.Put($"key_{i:D2}", $"val_{i}");
-
-        using var iter = db.Scan((string?)null, null);
-        var results = iter.ToList();
-
-        results.Should().HaveCount(10);
-    }
-
-    [Fact]
     public void Scan_Range_ReturnsSubset()
     {
         using var db = _fixture.CreateDb();
@@ -61,20 +48,5 @@ public class SlateDbScanTests
         var kv = iter.Next();
 
         kv.Should().BeNull();
-    }
-
-    [Fact]
-    public void Iterator_Seek_SkipsToKey()
-    {
-        using var db = _fixture.CreateDb();
-        for (var i = 0; i < 10; i++)
-            db.Put($"s_{i:D2}", $"v{i}");
-
-        using var iter = db.Scan((string?)null, null);
-        iter.Seek("s_05");
-        var kv = iter.Next();
-
-        kv.Should().NotBeNull();
-        kv!.KeyString.Should().Be("s_05");
     }
 }

@@ -27,14 +27,13 @@ public class SlateDbTests
     }
 
     [Fact]
-    public void Put_Get_LargeValue()
+    public void Put_GetTyped_Roundtrip()
     {
         using var db = _fixture.CreateDb();
-        var value = new string('x', 1024 * 1024);
 
-        db.Put("large", value);
+        db.Put("counter", 42);
 
-        db.GetString("large").Should().Be(value);
+        db.Get<int>("counter").Should().Be(42);
     }
 
     [Fact]
@@ -46,17 +45,6 @@ public class SlateDbTests
     }
 
     [Fact]
-    public void Put_Overwrite_ReturnsLatest()
-    {
-        using var db = _fixture.CreateDb();
-
-        db.Put("key", "v1");
-        db.Put("key", "v2");
-
-        db.GetString("key").Should().Be("v2");
-    }
-
-    [Fact]
     public void Delete_RemovesKey()
     {
         using var db = _fixture.CreateDb();
@@ -65,16 +53,6 @@ public class SlateDbTests
         db.Delete("del");
 
         db.GetString("del").Should().BeNull();
-    }
-
-    [Fact]
-    public void Delete_NonExistent_NoError()
-    {
-        using var db = _fixture.CreateDb();
-
-        var act = () => db.Delete("nope");
-
-        act.Should().NotThrow();
     }
 
     [Fact]

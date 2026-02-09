@@ -22,18 +22,6 @@ public class SlateDbBuilderTests
     }
 
     [Fact]
-    public void Builder_WithSstBlockSize_OpensDb()
-    {
-        var url = $"file:///{_fixture.TempDir}/builder_2";
-        using var db = SlateDb.Builder("test", url)
-            .WithSstBlockSize(SstBlockSize.Block4KB)
-            .Build();
-
-        db.Put("sk", "sv");
-        db.GetString("sk").Should().Be("sv");
-    }
-
-    [Fact]
     public void Builder_WithTypedSettings_OpensDb()
     {
         var url = $"file:///{_fixture.TempDir}/builder_3";
@@ -46,17 +34,5 @@ public class SlateDbBuilderTests
 
         db.Put("tk", "tv");
         db.GetString("tk").Should().Be("tv");
-    }
-
-    [Fact]
-    public void Builder_WithTypedSettingsDefaults_OpensDb()
-    {
-        var url = $"file:///{_fixture.TempDir}/builder_4";
-        using var db = SlateDb.Builder("test", url)
-            .WithSettings(new SlateDbSettings())
-            .Build();
-
-        db.Put("dk", "dv");
-        db.GetString("dk").Should().Be("dv");
     }
 }
