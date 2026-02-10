@@ -9,55 +9,24 @@
 dotnet add package Pulsy.SlateDB
 ```
 
-## Quick Start
+## Usage
 
 ```csharp
 using var db = SlateDb.Builder("my-db", new ObjectStoreConfig
     {
-        Bucket = "my-bucket", Region = "us-east-1", Endpoint = "http://localhost:9000",
+        Bucket   = "my-bucket",
+        Region   = "us-east-1",
+        Endpoint = "http://localhost:9000",
     })
     .Build();
 
-db.Put("greeting", "hello world");
-db.GetString("greeting");   // "hello world"
-db.Delete("greeting");
+db.Put("deck", "steam");
+db.GetString("deck");        // "steam"
+db.Get<int>("score");        // null
+db.Delete("deck");
 ```
 
-Also accepts [.env file](https://github.com/slatedb/slatedb/tree/main/slatedb-go#environment-variables): `SlateDb.Builder("my-db", envFile: ".env")`.
-
-## API
-
-| Operation  | Example                                                                        |
-|------------|--------------------------------------------------------------------------------|
-| **Get**    | `db.GetString("key")`, `db.Get<int>("key")`, `db.Get("key")` returns `byte[]?` |
-| **Put**    | `db.Put("key", "value")`, `db.Put("key", 42)`, `db.Put("key", bytes)`          |
-| **Delete** | `db.Delete("key")`                                                             |
-| **Batch**  | `batch.Put(...)` / `batch.Delete(...)`, then `db.Write(batch)`                 |
-| **Scan**   | `db.Scan(start, end)`, `db.ScanPrefix("user:")` - iterable via `foreach`       |
-| **Reader** | `SlateDb.OpenReader(...)` - read-only checkpoint-pinned view                   |
-
-Supports `string`, `int`, `long`, `double`, `bool`, `byte[]`. Optional `PutOptions` (TTL), `ReadOptions`, `ScanOptions`.
-
-## Settings
-
-All nullable — set only overrides, defaults come from Rust at runtime:
-
-```csharp
-.WithSettings(new SlateDbSettings
-{
-    CompressionCodec = CompressionCodec.Zstd,
-    L0SstSizeBytes   = 64 * 1024 * 1024,
-})
-```
-
-```csharp
-SlateDb.SettingsDefault();                // Rust defaults (JSON)
-SlateDb.SettingsFromFile("slatedb.toml"); // TOML file
-SlateDb.SettingsFromEnv("SLATEDB_");      // Env vars
-SlateDb.SettingsLoad();                   // Auto: file > env > defaults
-```
-
-See [example project](Pulsy.SlateDB.Example/) for full usage.
+See [example project](Pulsy.SlateDB.Example/Program.cs) for full API.
 
 ## Building from Source
 
