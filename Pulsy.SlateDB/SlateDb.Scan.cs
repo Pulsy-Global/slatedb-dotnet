@@ -22,93 +22,36 @@ public sealed partial class SlateDb
     public SlateDbScanIterator Scan(byte[]? startKey, byte[]? endKey)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
-        {
-            nint iterPtr;
-            fixed (byte* startPtr = startKey)
-            fixed (byte* endPtr = endKey)
-            {
-                var result = NativeMethods.slatedb_scan_with_options(
-                    _handle,
-                    startPtr, startKey != null ? (nuint)startKey.Length : 0,
-                    endPtr, endKey != null ? (nuint)endKey.Length : 0,
-                    null, &iterPtr);
-                SlateDbException.CheckResult(result);
-            }
-
-            return new SlateDbScanIterator(iterPtr);
-        }
+        var iterator = SlateDbUniffi.Wait(() => Db.Scan(
+            SlateDbUniffi.ToKeyRange(startKey, endKey)));
+        return new SlateDbScanIterator(iterator);
     }
 
     public SlateDbScanIterator Scan(byte[]? startKey, byte[]? endKey, ScanOptions options)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var nativeOpts = ToNativeScanOptions(options);
-
-        unsafe
-        {
-            nint iterPtr;
-            fixed (byte* startPtr = startKey)
-            fixed (byte* endPtr = endKey)
-            {
-                var result = NativeMethods.slatedb_scan_with_options(
-                    _handle,
-                    startPtr, startKey != null ? (nuint)startKey.Length : 0,
-                    endPtr, endKey != null ? (nuint)endKey.Length : 0,
-                    &nativeOpts, &iterPtr);
-                SlateDbException.CheckResult(result);
-            }
-
-            return new SlateDbScanIterator(iterPtr);
-        }
+        var iterator = SlateDbUniffi.Wait(() => Db.ScanWithOptions(
+            SlateDbUniffi.ToKeyRange(startKey, endKey),
+            SlateDbUniffi.ToNative(options)));
+        return new SlateDbScanIterator(iterator);
     }
 
     public SlateDbScanIterator ScanPrefix(byte[] prefix)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
-        {
-            nint iterPtr;
-            fixed (byte* prefixPtr = prefix)
-            {
-                var result = NativeMethods.slatedb_scan_prefix_with_options(
-                    _handle, prefixPtr, (nuint)prefix.Length, null, &iterPtr);
-                SlateDbException.CheckResult(result);
-            }
-
-            return new SlateDbScanIterator(iterPtr);
-        }
+        var iterator = SlateDbUniffi.Wait(() => Db.ScanPrefix(
+            prefix,
+            SlateDbUniffi.UnboundedKeyRange()));
+        return new SlateDbScanIterator(iterator);
     }
 
     public SlateDbScanIterator ScanPrefix(byte[] prefix, ScanOptions options)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var nativeOpts = ToNativeScanOptions(options);
-
-        unsafe
-        {
-            nint iterPtr;
-            fixed (byte* prefixPtr = prefix)
-            {
-                var result = NativeMethods.slatedb_scan_prefix_with_options(
-                    _handle, prefixPtr, (nuint)prefix.Length, &nativeOpts, &iterPtr);
-                SlateDbException.CheckResult(result);
-            }
-
-            return new SlateDbScanIterator(iterPtr);
-        }
+        var iterator = SlateDbUniffi.Wait(() => Db.ScanPrefixWithOptions(
+            prefix,
+            SlateDbUniffi.UnboundedKeyRange(),
+            SlateDbUniffi.ToNative(options)));
+        return new SlateDbScanIterator(iterator);
     }
-
-    internal static CSdbScanOptions ToNativeScanOptions(ScanOptions options) => new()
-    {
-        DurabilityFilter = (int)options.DurabilityFilter,
-        Dirty = (byte)(options.Dirty ? 1 : 0),
-        ReadAheadBytes = options.ReadAheadBytes,
-        CacheBlocks = (byte)(options.CacheBlocks ? 1 : 0),
-        MaxFetchTasks = options.MaxFetchTasks,
-    };
 }

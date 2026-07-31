@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Pulsy.SlateDB.Options;
 using Xunit;
 
 namespace Pulsy.SlateDB.Tests;
@@ -17,7 +18,7 @@ public class SlateDbScanTests
         foreach (var c in "abcdefghij")
             db.Put(c.ToString(), c.ToString());
 
-        // Scan [c, f) — keys c, d, e
+        // Scan [c, f): keys c, d, e
         using var iter = db.Scan("c", "f");
         var results = iter.ToList();
 
@@ -48,5 +49,18 @@ public class SlateDbScanTests
         var kv = iter.Next();
 
         kv.Should().BeNull();
+    }
+
+    [Fact]
+    public void Scan_SkipsExpiredValues()
+    {
+        using var db = _fixture.CreateDb();
+        db.Put("ttl:a", "expired", PutOptions.ExpireAfter(TimeSpan.FromMilliseconds(50)), WriteOptions.Default);
+        db.Put("ttl:b", "visible");
+        Thread.Sleep(100);
+
+        using var iter = db.ScanPrefix("ttl:");
+
+        iter.Select(kv => kv.KeyString).Should().Equal("ttl:b");
     }
 }

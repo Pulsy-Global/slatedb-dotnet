@@ -1,31 +1,30 @@
 using Pulsy.SlateDB.Native;
 using Pulsy.SlateDB.Options;
+using NativeWriteBatch = uniffi.slatedb.WriteBatch;
 
 namespace Pulsy.SlateDB;
 
 public sealed class SlateDbWriteBatch : IDisposable
 {
-    private nint _batch;
+    private NativeWriteBatch? _batch;
     private bool _disposed;
+    private bool _consumed;
 
-    internal nint NativeHandle
+    internal NativeWriteBatch NativeBatch
     {
         get
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return _batch;
+            if (_consumed)
+                throw new InvalidOperationException("Write batch has already been consumed.");
+
+            return _batch ?? throw new ObjectDisposedException(nameof(SlateDbWriteBatch));
         }
     }
 
     internal SlateDbWriteBatch()
     {
-        unsafe
-        {
-            nint batchPtr;
-            var result = NativeMethods.slatedb_write_batch_new(&batchPtr);
-            SlateDbException.CheckResult(result);
-            _batch = batchPtr;
-        }
+        _batch = SlateDbUniffi.Call(() => new NativeWriteBatch());
     }
 
     public void Put<T>(string key, T value) =>
@@ -39,55 +38,22 @@ public sealed class SlateDbWriteBatch : IDisposable
     public void Put(byte[] key, byte[] value)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
-        {
-            fixed (byte* keyPtr = key)
-            fixed (byte* valuePtr = value)
-            {
-                var result = NativeMethods.slatedb_write_batch_put(
-                    _batch, keyPtr, (nuint)key.Length, valuePtr, (nuint)value.Length);
-                SlateDbException.CheckResult(result);
-            }
-        }
+        SlateDbUniffi.Call(() => NativeBatch.Put(key, value));
     }
 
     public void Put(byte[] key, byte[] value, PutOptions options)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var nativeOpts = new CSdbPutOptions
-        {
-            TtlType = (uint)options.TtlType,
-            TtlValue = (ulong)options.TtlValue.TotalMilliseconds,
-        };
-
-        unsafe
-        {
-            fixed (byte* keyPtr = key)
-            fixed (byte* valuePtr = value)
-            {
-                var result = NativeMethods.slatedb_write_batch_put_with_options(
-                    _batch, keyPtr, (nuint)key.Length,
-                    valuePtr, (nuint)value.Length, &nativeOpts);
-                SlateDbException.CheckResult(result);
-            }
-        }
+        SlateDbUniffi.Call(() => NativeBatch.PutWithOptions(
+            key,
+            value,
+            SlateDbUniffi.ToNative(options)));
     }
 
     public void Delete(byte[] key)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
-        {
-            fixed (byte* keyPtr = key)
-            {
-                var result = NativeMethods.slatedb_write_batch_delete(
-                    _batch, keyPtr, (nuint)key.Length);
-                SlateDbException.CheckResult(result);
-            }
-        }
+        SlateDbUniffi.Call(() => NativeBatch.Delete(key));
     }
 
     public void Dispose()
@@ -95,10 +61,13 @@ public sealed class SlateDbWriteBatch : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        if (_batch != nint.Zero)
-        {
-            NativeMethods.slatedb_write_batch_close(_batch);
-            _batch = nint.Zero;
-        }
+        _batch?.Dispose();
+        _batch = null;
+    }
+
+    internal void MarkConsumed()
+    {
+        _consumed = true;
+        Dispose();
     }
 }

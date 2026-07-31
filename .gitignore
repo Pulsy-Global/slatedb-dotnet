@@ -81,6 +81,9 @@ runtimes/
 ## Auto-cloned slatedb source
 .slatedb-src/
 
+## Project-local code generation tools
+.tools/
+
 ## OS files
 .DS_Store
 Thumbs.db

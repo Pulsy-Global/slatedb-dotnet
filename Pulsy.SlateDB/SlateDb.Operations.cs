@@ -23,58 +23,17 @@ public sealed partial class SlateDb
     public byte[]? Get(byte[] key)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
-        {
-            CSdbValue nativeValue;
-            CSdbResult result;
-            fixed (byte* keyPtr = key)
-            {
-                result = NativeMethods.slatedb_get_with_options(
-                    _handle, keyPtr, (nuint)key.Length, null, &nativeValue);
-            }
-
-            if (result.Error == CSdbError.NotFound)
-            {
-                NativeMethods.slatedb_free_result(result);
-                return null;
-            }
-
-            SlateDbException.CheckResult(result);
-            return ConsumeValue(nativeValue);
-        }
+        var value = SlateDbUniffi.Wait(() => Db.GetKeyValue(key));
+        return SlateDbUniffi.ToValueOrNull(value);
     }
 
     public byte[]? Get(byte[] key, ReadOptions options)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var nativeOpts = new CSdbReadOptions
-        {
-            DurabilityFilter = (uint)options.DurabilityFilter,
-            Dirty = (byte)(options.Dirty ? 1 : 0),
-            CacheBlocks = (byte)(options.CacheBlocks ? 1 : 0),
-        };
-
-        unsafe
-        {
-            CSdbValue nativeValue;
-            CSdbResult result;
-            fixed (byte* keyPtr = key)
-            {
-                result = NativeMethods.slatedb_get_with_options(
-                    _handle, keyPtr, (nuint)key.Length, &nativeOpts, &nativeValue);
-            }
-
-            if (result.Error == CSdbError.NotFound)
-            {
-                NativeMethods.slatedb_free_result(result);
-                return null;
-            }
-
-            SlateDbException.CheckResult(result);
-            return ConsumeValue(nativeValue);
-        }
+        var value = SlateDbUniffi.Wait(() => Db.GetKeyValueWithOptions(
+            key,
+            SlateDbUniffi.ToNative(options)));
+        return SlateDbUniffi.ToValueOrNull(value);
     }
 
     public void Put<T>(string key, T value) =>
@@ -86,45 +45,17 @@ public sealed partial class SlateDb
     public void Put(byte[] key, byte[] value)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
-        {
-            fixed (byte* keyPtr = key)
-            fixed (byte* valuePtr = value)
-            {
-                var result = NativeMethods.slatedb_put_with_options(
-                    _handle, keyPtr, (nuint)key.Length,
-                    valuePtr, (nuint)value.Length, null, null);
-                SlateDbException.CheckResult(result);
-            }
-        }
+        _ = SlateDbUniffi.Wait(() => Db.Put(key, value));
     }
 
     public void Put(byte[] key, byte[] value, PutOptions putOptions, WriteOptions writeOptions)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var nativePut = new CSdbPutOptions
-        {
-            TtlType = (uint)putOptions.TtlType,
-            TtlValue = (ulong)putOptions.TtlValue.TotalMilliseconds,
-        };
-        var nativeWrite = new CSdbWriteOptions
-        {
-            AwaitDurable = (byte)(writeOptions.AwaitDurable ? 1 : 0),
-        };
-
-        unsafe
-        {
-            fixed (byte* keyPtr = key)
-            fixed (byte* valuePtr = value)
-            {
-                var result = NativeMethods.slatedb_put_with_options(
-                    _handle, keyPtr, (nuint)key.Length,
-                    valuePtr, (nuint)value.Length, &nativePut, &nativeWrite);
-                SlateDbException.CheckResult(result);
-            }
-        }
+        _ = SlateDbUniffi.Wait(() => Db.PutWithOptions(
+            key,
+            value,
+            SlateDbUniffi.ToNative(putOptions),
+            SlateDbUniffi.ToNative(writeOptions)));
     }
 
     public void Delete(string key) => Delete(SlateDbConvert.ToBytes(key));
@@ -133,62 +64,42 @@ public sealed partial class SlateDb
     public void Delete(byte[] key)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
-        {
-            fixed (byte* keyPtr = key)
-            {
-                var result = NativeMethods.slatedb_delete_with_options(
-                    _handle, keyPtr, (nuint)key.Length, null);
-                SlateDbException.CheckResult(result);
-            }
-        }
+        _ = SlateDbUniffi.Wait(() => Db.Delete(key));
     }
 
     public void Delete(byte[] key, WriteOptions options)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var nativeWrite = new CSdbWriteOptions
-        {
-            AwaitDurable = (byte)(options.AwaitDurable ? 1 : 0),
-        };
-
-        unsafe
-        {
-            fixed (byte* keyPtr = key)
-            {
-                var result = NativeMethods.slatedb_delete_with_options(
-                    _handle, keyPtr, (nuint)key.Length, &nativeWrite);
-                SlateDbException.CheckResult(result);
-            }
-        }
+        _ = SlateDbUniffi.Wait(() => Db.DeleteWithOptions(key, SlateDbUniffi.ToNative(options)));
     }
 
     public void Write(SlateDbWriteBatch batch)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
+        var nativeBatch = batch.NativeBatch;
+        try
         {
-            var result = NativeMethods.slatedb_write_batch_write(_handle, batch.NativeHandle, null);
-            SlateDbException.CheckResult(result);
+            _ = SlateDbUniffi.Wait(() => Db.Write(nativeBatch));
+        }
+        finally
+        {
+            batch.MarkConsumed();
         }
     }
 
     public void Write(SlateDbWriteBatch batch, WriteOptions options)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var nativeWrite = new CSdbWriteOptions
+        var nativeBatch = batch.NativeBatch;
+        try
         {
-            AwaitDurable = (byte)(options.AwaitDurable ? 1 : 0),
-        };
-
-        unsafe
+            _ = SlateDbUniffi.Wait(() => Db.WriteWithOptions(
+                nativeBatch,
+                SlateDbUniffi.ToNative(options)));
+        }
+        finally
         {
-            var result = NativeMethods.slatedb_write_batch_write(_handle, batch.NativeHandle, &nativeWrite);
-            SlateDbException.CheckResult(result);
+            batch.MarkConsumed();
         }
     }
 }

@@ -1,45 +1,56 @@
-using System.Runtime.InteropServices;
+using Pulsy.SlateDB.Metrics;
 using Pulsy.SlateDB.Native;
 using Pulsy.SlateDB.Options;
+using NativeDbReader = uniffi.slatedb.DbReader;
+using NativeDbReaderBuilder = uniffi.slatedb.DbReaderBuilder;
+using NativeReaderMode = uniffi.slatedb.ReaderMode;
 
 namespace Pulsy.SlateDB;
 
 public sealed class SlateDbReader : ISlateDbReadable
 {
-    private CSdbReaderHandle _handle;
+    private NativeDbReader? _reader;
+    private SlateDbNativeMetrics? _metrics;
     private bool _disposed;
 
-    private SlateDbReader(CSdbReaderHandle handle)
+    private SlateDbReader(NativeDbReader reader, SlateDbNativeMetrics metrics)
     {
-        _handle = handle;
+        _reader = reader;
+        _metrics = metrics;
     }
 
-    internal static SlateDbReader Open(string path, string url, string? envFile,
-        string? checkpointId, ReaderOptions? options)
+    internal static SlateDbReader Open(
+        string path,
+        string url,
+        string? envFile,
+        string? checkpointId,
+        ReaderOptions? options)
     {
-        unsafe
+        using var location = SlateDbUniffi.ResolveObjectStore(path, url, envFile);
+        using var builder = SlateDbUniffi.Call(() =>
+            new NativeDbReaderBuilder(location.Path, location.ObjectStore));
+        var metrics = new SlateDbNativeMetrics();
+
+        try
         {
-            CSdbReaderHandleResult handleResult;
-            if (options != null)
+            SlateDbUniffi.Call(() => builder.WithMetricsRecorder(metrics.Adapter));
+
+            if (checkpointId is not null)
             {
-                var nativeOpts = new CSdbReaderOptions
-                {
-                    ManifestPollIntervalMs = (ulong)options.ManifestPollInterval.TotalMilliseconds,
-                    CheckpointLifetimeMs = (ulong)options.CheckpointLifetime.TotalMilliseconds,
-                    MaxMemtableBytes = options.MaxMemtableBytes,
-                    SkipWalReplay = (byte)(options.SkipWalReplay ? 1 : 0),
-                };
-                handleResult = NativeMethods.slatedb_reader_open(
-                    path, url, envFile, checkpointId, &nativeOpts);
-            }
-            else
-            {
-                handleResult = NativeMethods.slatedb_reader_open(
-                    path, url, envFile, checkpointId, null);
+                SlateDbUniffi.Call(() =>
+                    builder.WithReaderMode(new NativeReaderMode.Checkpoint(checkpointId)));
             }
 
-            SlateDbException.CheckResult(handleResult.Result);
-            return new SlateDbReader(handleResult.Handle);
+            if (options is not null)
+                SlateDbUniffi.Call(() => builder.WithOptions(SlateDbUniffi.ToNative(options)));
+
+            var reader = SlateDbUniffi.Wait(() => builder.Build());
+            return new SlateDbReader(reader, metrics);
+        }
+        catch
+        {
+            metrics.Dispose();
+            throw;
         }
     }
 
@@ -61,58 +72,17 @@ public sealed class SlateDbReader : ISlateDbReadable
     public byte[]? Get(byte[] key)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
-        {
-            CSdbValue nativeValue;
-            CSdbResult result;
-            fixed (byte* keyPtr = key)
-            {
-                result = NativeMethods.slatedb_reader_get_with_options(
-                    _handle, keyPtr, (nuint)key.Length, null, &nativeValue);
-            }
-
-            if (result.Error == CSdbError.NotFound)
-            {
-                NativeMethods.slatedb_free_result(result);
-                return null;
-            }
-
-            SlateDbException.CheckResult(result);
-            return ConsumeValue(nativeValue);
-        }
+        var value = SlateDbUniffi.Wait(() => Reader.GetKeyValue(key));
+        return SlateDbUniffi.ToValueOrNull(value);
     }
 
     public byte[]? Get(byte[] key, ReadOptions options)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var nativeOpts = new CSdbReadOptions
-        {
-            DurabilityFilter = (uint)options.DurabilityFilter,
-            Dirty = (byte)(options.Dirty ? 1 : 0),
-            CacheBlocks = (byte)(options.CacheBlocks ? 1 : 0),
-        };
-
-        unsafe
-        {
-            CSdbValue nativeValue;
-            CSdbResult result;
-            fixed (byte* keyPtr = key)
-            {
-                result = NativeMethods.slatedb_reader_get_with_options(
-                    _handle, keyPtr, (nuint)key.Length, &nativeOpts, &nativeValue);
-            }
-
-            if (result.Error == CSdbError.NotFound)
-            {
-                NativeMethods.slatedb_free_result(result);
-                return null;
-            }
-
-            SlateDbException.CheckResult(result);
-            return ConsumeValue(nativeValue);
-        }
+        var value = SlateDbUniffi.Wait(() => Reader.GetKeyValueWithOptions(
+            key,
+            SlateDbUniffi.ToNative(options)));
+        return SlateDbUniffi.ToValueOrNull(value);
     }
 
     public SlateDbScanIterator Scan(string? startKey, string? endKey) =>
@@ -132,85 +102,66 @@ public sealed class SlateDbReader : ISlateDbReadable
     public SlateDbScanIterator Scan(byte[]? startKey, byte[]? endKey)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
-        {
-            nint iterPtr;
-            fixed (byte* startPtr = startKey)
-            fixed (byte* endPtr = endKey)
-            {
-                var result = NativeMethods.slatedb_reader_scan_with_options(
-                    _handle,
-                    startPtr, startKey != null ? (nuint)startKey.Length : 0,
-                    endPtr, endKey != null ? (nuint)endKey.Length : 0,
-                    null, &iterPtr);
-                SlateDbException.CheckResult(result);
-            }
-
-            return new SlateDbScanIterator(iterPtr);
-        }
+        var iterator = SlateDbUniffi.Wait(() => Reader.Scan(
+            SlateDbUniffi.ToKeyRange(startKey, endKey)));
+        return new SlateDbScanIterator(iterator);
     }
 
     public SlateDbScanIterator Scan(byte[]? startKey, byte[]? endKey, ScanOptions options)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var nativeOpts = SlateDb.ToNativeScanOptions(options);
-
-        unsafe
-        {
-            nint iterPtr;
-            fixed (byte* startPtr = startKey)
-            fixed (byte* endPtr = endKey)
-            {
-                var result = NativeMethods.slatedb_reader_scan_with_options(
-                    _handle,
-                    startPtr, startKey != null ? (nuint)startKey.Length : 0,
-                    endPtr, endKey != null ? (nuint)endKey.Length : 0,
-                    &nativeOpts, &iterPtr);
-                SlateDbException.CheckResult(result);
-            }
-
-            return new SlateDbScanIterator(iterPtr);
-        }
+        var iterator = SlateDbUniffi.Wait(() => Reader.ScanWithOptions(
+            SlateDbUniffi.ToKeyRange(startKey, endKey),
+            SlateDbUniffi.ToNative(options)));
+        return new SlateDbScanIterator(iterator);
     }
 
     public SlateDbScanIterator ScanPrefix(byte[] prefix)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
-        {
-            nint iterPtr;
-            fixed (byte* prefixPtr = prefix)
-            {
-                var result = NativeMethods.slatedb_reader_scan_prefix_with_options(
-                    _handle, prefixPtr, (nuint)prefix.Length, null, &iterPtr);
-                SlateDbException.CheckResult(result);
-            }
-
-            return new SlateDbScanIterator(iterPtr);
-        }
+        var iterator = SlateDbUniffi.Wait(() => Reader.ScanPrefix(
+            prefix,
+            SlateDbUniffi.UnboundedKeyRange()));
+        return new SlateDbScanIterator(iterator);
     }
 
     public SlateDbScanIterator ScanPrefix(byte[] prefix, ScanOptions options)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        var iterator = SlateDbUniffi.Wait(() => Reader.ScanPrefixWithOptions(
+            prefix,
+            SlateDbUniffi.UnboundedKeyRange(),
+            SlateDbUniffi.ToNative(options)));
+        return new SlateDbScanIterator(iterator);
+    }
 
-        var nativeOpts = SlateDb.ToNativeScanOptions(options);
+    public IReadOnlyList<SlateDbMetric> GetMetrics()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return MetricsRecorder.Snapshot();
+    }
 
-        unsafe
-        {
-            nint iterPtr;
-            fixed (byte* prefixPtr = prefix)
-            {
-                var result = NativeMethods.slatedb_reader_scan_prefix_with_options(
-                    _handle, prefixPtr, (nuint)prefix.Length, &nativeOpts, &iterPtr);
-                SlateDbException.CheckResult(result);
-            }
+    /// <summary>
+    /// Returns every metric with the requested name.
+    /// </summary>
+    public IReadOnlyList<SlateDbMetric> GetMetrics(string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        return MetricsRecorder.ByName(name);
+    }
 
-            return new SlateDbScanIterator(iterPtr);
-        }
+    /// <summary>
+    /// Returns the metric matching the name and exact label set.
+    /// </summary>
+    public SlateDbMetric? GetMetric(
+        string name,
+        params SlateDbMetricLabel[] labels)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(labels);
+        return MetricsRecorder.ByNameAndLabels(name, labels);
     }
 
     public void Dispose()
@@ -218,16 +169,24 @@ public sealed class SlateDbReader : ISlateDbReadable
         if (_disposed) return;
         _disposed = true;
 
-        var result = NativeMethods.slatedb_reader_close(_handle);
-        _handle = default;
-        SlateDbException.CheckResult(result);
+        var reader = _reader;
+        _reader = null;
+        try
+        {
+            if (reader is not null)
+                SlateDbUniffi.Wait(() => reader.Shutdown());
+        }
+        finally
+        {
+            reader?.Dispose();
+            _metrics?.Dispose();
+            _metrics = null;
+        }
     }
 
-    private static byte[] ConsumeValue(CSdbValue nativeValue)
-    {
-        var managed = new byte[(int)nativeValue.Len];
-        Marshal.Copy(nativeValue.Data, managed, 0, (int)nativeValue.Len);
-        NativeMethods.slatedb_free_value(nativeValue);
-        return managed;
-    }
+    private NativeDbReader Reader =>
+        _reader ?? throw new ObjectDisposedException(nameof(SlateDbReader));
+
+    private SlateDbNativeMetrics MetricsRecorder =>
+        _metrics ?? throw new ObjectDisposedException(nameof(SlateDbReader));
 }

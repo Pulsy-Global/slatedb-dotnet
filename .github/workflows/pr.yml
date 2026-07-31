@@ -2,7 +2,7 @@ name: PR Build & Test
 
 on:
   pull_request:
-    branches: [main]
+    branches: [master]
 
 jobs:
   build-and-test:
@@ -10,12 +10,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.91.1
       - run: ./build-native.sh
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '10.0.x'
 
       - run: dotnet build Pulsy.SlateDB.sln
       - run: dotnet test Pulsy.SlateDB.sln

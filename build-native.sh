@@ -1,22 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build slatedb-c native libraries.
+# Build SlateDB UniFFI native libraries.
 #
 # Usage:
 #   ./build-native.sh [--all] [path-to-slatedb-source]
 #
 # Without --all: builds only for the current platform (fast).
-# With    --all: builds for all 6 platforms using cargo-zigbuild.
+# With    --all: builds every target supported by the current host.
 #
 # If no source path is provided, clones slatedb into .slatedb-src/ automatically.
 #
+# Override the default SlateDB ref with:
+#   SLATEDB_REF=<tag-or-sha> ./build-native.sh
+#
 # Requirements:
-#   - rustup with nightly toolchain: rustup install nightly
-#   - For --all: cargo-zigbuild + zig: brew install zig && cargo install cargo-zigbuild
+#   - rustup with the SlateDB toolchain (1.91.1 by default)
+#   - For Linux --all: cargo-zigbuild + zig
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SLATEDB_CLONE_DIR="$SCRIPT_DIR/.slatedb-src"
+SLATEDB_REF="${SLATEDB_REF:-v0.15.0}"
+SLATEDB_RUST_TOOLCHAIN="${SLATEDB_RUST_TOOLCHAIN:-1.91.1}"
+HOST_OS="$(uname -s)"
 
 # Parse arguments
 BUILD_ALL=false
@@ -31,13 +37,20 @@ done
 # Clone or update source
 if [ -z "$SLATEDB_SRC" ]; then
     if [ -d "$SLATEDB_CLONE_DIR/.git" ]; then
-        echo "Updating existing slatedb clone..."
-        git -C "$SLATEDB_CLONE_DIR" pull --ff-only
+        if [ -n "$(git -C "$SLATEDB_CLONE_DIR" status --porcelain)" ]; then
+            echo "Error: $SLATEDB_CLONE_DIR has local changes. Clean it or pass an explicit source path." >&2
+            exit 1
+        fi
+        echo "Checking out slatedb $SLATEDB_REF in $SLATEDB_CLONE_DIR"
+        git -C "$SLATEDB_CLONE_DIR" fetch --depth 1 origin "$SLATEDB_REF"
+        git -C "$SLATEDB_CLONE_DIR" checkout --detach FETCH_HEAD
     else
-        echo "Cloning slatedb..."
-        git clone --depth 1 https://github.com/slatedb/slatedb.git "$SLATEDB_CLONE_DIR"
+        echo "Cloning slatedb $SLATEDB_REF..."
+        git clone --depth 1 --branch "$SLATEDB_REF" https://github.com/slatedb/slatedb.git "$SLATEDB_CLONE_DIR"
     fi
     SLATEDB_SRC="$SLATEDB_CLONE_DIR"
+else
+    echo "Using provided slatedb source: $SLATEDB_SRC"
 fi
 
 if [ ! -f "$SLATEDB_SRC/Cargo.toml" ]; then
@@ -48,15 +61,14 @@ fi
 RUNTIMES_DIR="$SCRIPT_DIR/runtimes"
 
 # .NET RID / Rust target / output library name (parallel arrays, bash 3.2 compatible)
-# Windows uses GNU ABI for cross-compilation with zigbuild
 RIDS=(         osx-arm64              osx-x64                linux-arm64                 linux-x64                   win-arm64                    win-x64               )
-RUST_TARGETS=( aarch64-apple-darwin   x86_64-apple-darwin    aarch64-unknown-linux-gnu   x86_64-unknown-linux-gnu    aarch64-pc-windows-gnullvm   x86_64-pc-windows-gnu  )
-LIB_NAMES=(   libslatedb_c.dylib     libslatedb_c.dylib     libslatedb_c.so             libslatedb_c.so             slatedb_c.dll                slatedb_c.dll          )
+RUST_TARGETS=( aarch64-apple-darwin   x86_64-apple-darwin    aarch64-unknown-linux-gnu   x86_64-unknown-linux-gnu    aarch64-pc-windows-msvc      x86_64-pc-windows-msvc )
+LIB_NAMES=(   libslatedb_uniffi.dylib libslatedb_uniffi.dylib libslatedb_uniffi.so         libslatedb_uniffi.so         slatedb_uniffi.dll           slatedb_uniffi.dll     )
 
-# Force nightly toolchain via PATH (Homebrew cargo/rustc ignores RUSTUP_TOOLCHAIN)
-NIGHTLY_BIN="$(dirname "$(rustup which cargo --toolchain nightly)")"
-export PATH="$NIGHTLY_BIN:$PATH"
-echo "Using: $(cargo --version), $(rustc --version)"
+# Invoke the pinned toolchain explicitly so this also works with Windows paths.
+CARGO=(rustup run "$SLATEDB_RUST_TOOLCHAIN" cargo)
+RUSTC_BIN="$(rustup which --toolchain "$SLATEDB_RUST_TOOLCHAIN" rustc)"
+echo "Using: $("${CARGO[@]}" --version), $("$RUSTC_BIN" --version)"
 
 # Detect native platform RID
 detect_native_rid() {
@@ -65,7 +77,7 @@ detect_native_rid() {
         arm64|aarch64) arch="arm64" ;;
         *)             arch="x64" ;;
     esac
-    case "$(uname -s)" in
+    case "$HOST_OS" in
         Darwin)              echo "osx-$arch" ;;
         Linux)               echo "linux-$arch" ;;
         MINGW*|MSYS*|CYGWIN*) echo "win-$arch" ;;
@@ -74,14 +86,15 @@ detect_native_rid() {
 }
 NATIVE_RID="$(detect_native_rid)"
 
-# Check zigbuild for cross builds
+# Only Linux cross-architecture builds need zigbuild. macOS and Windows use
+# their platform SDK/toolchain for the other architecture.
 HAS_ZIGBUILD=false
-if command -v cargo-zigbuild &>/dev/null || [ -f "$HOME/.cargo/bin/cargo-zigbuild" ]; then
+if "${CARGO[@]}" zigbuild --version &>/dev/null; then
     HAS_ZIGBUILD=true
 fi
 
-if [ "$BUILD_ALL" = true ] && [ "$HAS_ZIGBUILD" = false ]; then
-    echo "Error: --all requires cargo-zigbuild. Install: brew install zig && cargo install cargo-zigbuild" >&2
+if [ "$BUILD_ALL" = true ] && [ "$HOST_OS" = "Linux" ] && [ "$HAS_ZIGBUILD" = false ]; then
+    echo "Error: Linux --all requires cargo-zigbuild and zig." >&2
     exit 1
 fi
 
@@ -99,34 +112,31 @@ for i in "${!RIDS[@]}"; do
         continue
     fi
 
-    # macOS targets require a macOS host (no SDK available on Linux)
-    case "$RID" in
-        osx-*)
-            if [ "$(uname -s)" != "Darwin" ]; then
-                echo "  Skipping $RID (requires macOS host)"
-                continue
-            fi ;;
-        linux-*|win-*)
-            if [ "$(uname -s)" = "Darwin" ]; then
-                echo "  Skipping $RID (built on Linux host)"
-                continue
-            fi ;;
+    # Native libraries are built on their corresponding operating system.
+    case "$HOST_OS:$RID" in
+        Darwin:osx-*|Linux:linux-*|MINGW*:win-*|MSYS*:win-*|CYGWIN*:win-*) ;;
+        *)
+            echo "  Skipping $RID (unsupported on $HOST_OS host)"
+            continue ;;
     esac
 
     echo ""
     echo "=== Building $RID ($TARGET) ==="
 
-    rustup target add --toolchain nightly "$TARGET" 2>/dev/null || true
+    rustup target add --toolchain "$SLATEDB_RUST_TOOLCHAIN" "$TARGET"
     mkdir -p "$OUT_DIR"
 
-    # Use zigbuild for cross-compilation, plain cargo for native
-    if [ "$RID" = "$NATIVE_RID" ]; then
-        BUILD_CMD="cargo build"
+    # Zig provides the Linux cross-linker. Platform toolchains handle macOS
+    # and Windows cross-architecture builds directly.
+    if [ "$HOST_OS" = "Linux" ] && [ "$RID" != "$NATIVE_RID" ]; then
+        BUILD_CMD=("${CARGO[@]}" zigbuild)
     else
-        BUILD_CMD="cargo zigbuild"
+        # cargo resolves rustc through PATH independently. Pin it explicitly so
+        # a system/Homebrew Rust installation cannot override the rustup toolchain.
+        BUILD_CMD=(env "RUSTC=$RUSTC_BIN" "${CARGO[@]}" build)
     fi
 
-    if $BUILD_CMD --release -p slatedb-c --target "$TARGET" \
+    if "${BUILD_CMD[@]}" --release -p slatedb-uniffi --target "$TARGET" \
         --manifest-path "$SLATEDB_SRC/Cargo.toml" 2>&1; then
 
         SRC="$SLATEDB_SRC/target/$TARGET/release/$LIB_NAME"
@@ -159,3 +169,7 @@ echo "Succeeded:${SUCCEEDED:- none}"
 echo "Failed:   ${FAILED:- none}"
 echo ""
 echo "Native libraries are in: $RUNTIMES_DIR/"
+
+if [ -n "$FAILED" ]; then
+    exit 1
+fi

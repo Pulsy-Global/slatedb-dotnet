@@ -10,21 +10,30 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            targets: linux + windows
+            artifact: linux
           - os: macos-latest
-            targets: macOS
+            artifact: macos
+          - os: windows-latest
+            artifact: windows
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: goto-bus-stop/setup-zig@v2
-      - run: cargo install cargo-zigbuild
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.91.1
+      - uses: mlugg/setup-zig@v2
+        if: runner.os == 'Linux'
+        with:
+          version: 0.14.1
+      - run: cargo install --locked cargo-zigbuild
+        if: runner.os == 'Linux'
       - run: ./build-native.sh --all
+        shell: bash
 
       - uses: actions/upload-artifact@v4
         with:
-          name: native-${{ matrix.os }}
+          name: native-${{ matrix.artifact }}
           path: runtimes/
 
   release:
@@ -41,9 +50,10 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '10.0.x'
 
       - run: dotnet build Pulsy.SlateDB.sln -c Release
+      - run: dotnet test Pulsy.SlateDB.sln -c Release --no-build
 
       - name: Extract version from tag
         id: version

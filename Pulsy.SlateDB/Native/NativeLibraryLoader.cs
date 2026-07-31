@@ -5,31 +5,46 @@ namespace Pulsy.SlateDB.Native;
 
 internal static class NativeLibraryLoader
 {
+    private static readonly object InitializationLock = new();
     private static int _initialized;
 
     internal static void Initialize()
     {
-        if (Interlocked.Exchange(ref _initialized, 1) == 1)
+        if (Volatile.Read(ref _initialized) == 1)
             return;
 
-        NativeLibrary.SetDllImportResolver(typeof(NativeLibraryLoader).Assembly, Resolve);
+        lock (InitializationLock)
+        {
+            if (_initialized == 1)
+                return;
+
+            NativeLibrary.SetDllImportResolver(typeof(NativeLibraryLoader).Assembly, Resolve);
+            Volatile.Write(ref _initialized, 1);
+        }
     }
 
     internal static void Initialize(string absolutePath)
     {
-        if (Interlocked.Exchange(ref _initialized, 1) == 1)
+        if (Volatile.Read(ref _initialized) == 1)
             return;
 
-        NativeLibrary.SetDllImportResolver(typeof(NativeLibraryLoader).Assembly, (name, _, _) =>
+        lock (InitializationLock)
         {
-            if (name != "slatedb_c") return nint.Zero;
-            return NativeLibrary.Load(absolutePath);
-        });
+            if (_initialized == 1)
+                return;
+
+            NativeLibrary.SetDllImportResolver(typeof(NativeLibraryLoader).Assembly, (name, _, _) =>
+            {
+                if (name != "slatedb_uniffi") return nint.Zero;
+                return NativeLibrary.Load(absolutePath);
+            });
+            Volatile.Write(ref _initialized, 1);
+        }
     }
 
     private static nint Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
-        if (libraryName != "slatedb_c")
+        if (libraryName != "slatedb_uniffi")
             return nint.Zero;
 
         // Try default resolution first
@@ -78,9 +93,9 @@ internal static class NativeLibraryLoader
     private static string GetLibraryFileName()
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            return "libslatedb_c.dylib";
+            return "libslatedb_uniffi.dylib";
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            return "slatedb_c.dll";
-        return "libslatedb_c.so";
+            return "slatedb_uniffi.dll";
+        return "libslatedb_uniffi.so";
     }
 }

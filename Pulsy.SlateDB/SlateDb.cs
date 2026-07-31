@@ -1,20 +1,24 @@
-using System.Runtime.InteropServices;
 using Pulsy.SlateDB.Native;
+using Pulsy.SlateDB.Metrics;
 using Pulsy.SlateDB.Options;
+using NativeDb = uniffi.slatedb.Db;
+using NativeFlushOptions = uniffi.slatedb.FlushOptions;
+using NativeFlushType = uniffi.slatedb.FlushType;
+using NativeSettings = uniffi.slatedb.Settings;
 
 namespace Pulsy.SlateDB;
 
 public sealed partial class SlateDb : ISlateDbReadable
 {
-    private CSdbHandle _handle;
+    private NativeDb? _db;
+    private SlateDbNativeMetrics? _metrics;
     private bool _disposed;
 
-    private SlateDb(CSdbHandle handle)
+    private SlateDb(NativeDb db, SlateDbNativeMetrics metrics)
     {
-        _handle = handle;
+        _db = db;
+        _metrics = metrics;
     }
-
-    // --- Static: Library loading ---
 
     public static void LoadLibrary()
     {
@@ -26,74 +30,58 @@ public sealed partial class SlateDb : ISlateDbReadable
         NativeLibraryLoader.Initialize(absolutePath);
     }
 
-    // --- Static: Logging ---
-
     public static void InitLogging(LogLevel level)
     {
         NativeLibraryLoader.Initialize();
-        var levelStr = level switch
-        {
-            LogLevel.Trace => "trace",
-            LogLevel.Debug => "debug",
-            LogLevel.Info => "info",
-            LogLevel.Warn => "warn",
-            LogLevel.Error => "error",
-            _ => "info",
-        };
-        var result = NativeMethods.slatedb_init_logging(levelStr);
-        SlateDbException.CheckResult(result);
+        SlateDbUniffi.Call(() => uniffi.slatedb.SlatedbMethods.InitLogging(
+            SlateDbUniffi.ToNative(level),
+            null));
     }
-
-    // --- Static: Settings ---
 
     public static string SettingsDefault()
     {
         NativeLibraryLoader.Initialize();
-        var ptr = NativeMethods.slatedb_settings_default();
-        return ConsumeString(ptr);
+        using var settings = SlateDbUniffi.Call(NativeSettings.Default);
+        return SlateDbUniffi.Call(settings.ToJsonString);
     }
 
     public static string SettingsFromFile(string path)
     {
         NativeLibraryLoader.Initialize();
-        var ptr = NativeMethods.slatedb_settings_from_file(path);
-        return ConsumeString(ptr);
+        using var settings = SlateDbUniffi.Call(() => NativeSettings.FromFile(path));
+        return SlateDbUniffi.Call(settings.ToJsonString);
     }
 
     public static string SettingsFromEnv(string prefix)
     {
         NativeLibraryLoader.Initialize();
-        var ptr = NativeMethods.slatedb_settings_from_env(prefix);
-        return ConsumeString(ptr);
+        using var settings = SlateDbUniffi.Call(() => NativeSettings.FromEnv(prefix));
+        return SlateDbUniffi.Call(settings.ToJsonString);
     }
 
     public static string SettingsLoad()
     {
         NativeLibraryLoader.Initialize();
-        var ptr = NativeMethods.slatedb_settings_load();
-        return ConsumeString(ptr);
+        using var settings = SlateDbUniffi.Call(NativeSettings.Load);
+        return SlateDbUniffi.Call(settings.ToJsonString);
     }
-
-    // --- Static: Open ---
 
     public static SlateDb Open(string path, string? url = null, string? envFile = null)
     {
-        NativeLibraryLoader.Initialize();
-        var handleResult = NativeMethods.slatedb_open(path, url, envFile);
-        SlateDbException.CheckResult(handleResult.Result);
-        return new SlateDb(handleResult.Handle);
+        using var builder = Builder(path, url, envFile);
+        return builder.Build();
     }
 
-    // --- Static: Reader ---
-
-    public static SlateDbReader OpenReader(string path, string url, string? envFile,
-        string? checkpointId, ReaderOptions? options = null)
+    public static SlateDbReader OpenReader(
+        string path,
+        string url,
+        string? envFile,
+        string? checkpointId,
+        ReaderOptions? options = null)
     {
         NativeLibraryLoader.Initialize();
         return SlateDbReader.Open(path, url, envFile, checkpointId, options);
     }
-
-    // --- Static: Builder ---
 
     public static SlateDbBuilder Builder(string path, string? url = null, string? envFile = null)
     {
@@ -107,70 +95,90 @@ public sealed partial class SlateDb : ISlateDbReadable
         return new SlateDbBuilder(path, objectStore);
     }
 
-    // --- Static: WriteBatch ---
-
     public static SlateDbWriteBatch NewWriteBatch()
     {
         NativeLibraryLoader.Initialize();
         return new SlateDbWriteBatch();
     }
 
-    // --- Maintenance ---
-
     public void Flush()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var result = NativeMethods.slatedb_flush(_handle);
-        SlateDbException.CheckResult(result);
+        SlateDbUniffi.Wait(() => Db.Flush());
     }
 
-    public string Metrics()
+    /// <summary>
+    /// Flushes the active memtable to L0 and advances the WAL replay boundary.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="Flush"/>, this also makes older WAL files eligible for
+    /// garbage collection when WAL is enabled.
+    /// </remarks>
+    public void FlushMemTable()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
-        {
-            CSdbValue nativeValue;
-            var result = NativeMethods.slatedb_metrics(_handle, &nativeValue);
-            SlateDbException.CheckResult(result);
-
-            var json = Marshal.PtrToStringUTF8(nativeValue.Data, (int)nativeValue.Len) ?? "";
-            NativeMethods.slatedb_free_value(nativeValue);
-            return json;
-        }
+        SlateDbUniffi.Wait(() => Db.FlushWithOptions(
+            new NativeFlushOptions(NativeFlushType.MemTable)));
     }
 
-    // --- Dispose ---
+    /// <summary>
+    /// Returns a point-in-time snapshot of every registered SlateDB metric.
+    /// </summary>
+    public IReadOnlyList<SlateDbMetric> GetMetrics()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return MetricsRecorder.Snapshot();
+    }
+
+    /// <summary>
+    /// Returns every metric with the requested name.
+    /// </summary>
+    public IReadOnlyList<SlateDbMetric> GetMetrics(string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        return MetricsRecorder.ByName(name);
+    }
+
+    /// <summary>
+    /// Returns the metric matching the name and exact label set.
+    /// </summary>
+    public SlateDbMetric? GetMetric(
+        string name,
+        params SlateDbMetricLabel[] labels)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(labels);
+        return MetricsRecorder.ByNameAndLabels(name, labels);
+    }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
 
-        var result = NativeMethods.slatedb_close(_handle);
-        _handle = default;
-        SlateDbException.CheckResult(result);
+        var db = _db;
+        _db = null;
+        try
+        {
+            if (db is not null)
+                SlateDbUniffi.Wait(() => db.Shutdown());
+        }
+        finally
+        {
+            db?.Dispose();
+            _metrics?.Dispose();
+            _metrics = null;
+        }
     }
 
-    // --- Internal ---
+    internal static SlateDb FromNative(NativeDb db, SlateDbNativeMetrics metrics) =>
+        new(db, metrics);
 
-    internal static SlateDb FromHandle(CSdbHandle handle) => new(handle);
+    private NativeDb Db =>
+        _db ?? throw new ObjectDisposedException(nameof(SlateDb));
 
-    private static byte[] ConsumeValue(CSdbValue nativeValue)
-    {
-        var managed = new byte[(int)nativeValue.Len];
-        Marshal.Copy(nativeValue.Data, managed, 0, (int)nativeValue.Len);
-        NativeMethods.slatedb_free_value(nativeValue);
-        return managed;
-    }
-
-    private static string ConsumeString(nint ptr)
-    {
-        if (ptr == nint.Zero) return "";
-        var str = Marshal.PtrToStringUTF8(ptr) ?? "";
-        var val = new CSdbValue { Data = ptr, Len = (nuint)str.Length };
-        NativeMethods.slatedb_free_value(val);
-        return str;
-    }
+    private SlateDbNativeMetrics MetricsRecorder =>
+        _metrics ?? throw new ObjectDisposedException(nameof(SlateDb));
 }

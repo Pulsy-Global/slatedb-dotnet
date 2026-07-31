@@ -1,15 +1,15 @@
 using System.Collections;
-using System.Runtime.InteropServices;
 using Pulsy.SlateDB.Native;
+using NativeDbIterator = uniffi.slatedb.DbIterator;
 
 namespace Pulsy.SlateDB;
 
 public sealed class SlateDbScanIterator : IDisposable, IEnumerable<SlateDbKeyValue>
 {
-    private nint _iterator;
+    private NativeDbIterator? _iterator;
     private bool _disposed;
 
-    internal SlateDbScanIterator(nint iterator)
+    internal SlateDbScanIterator(NativeDbIterator iterator)
     {
         _iterator = iterator;
     }
@@ -17,30 +17,14 @@ public sealed class SlateDbScanIterator : IDisposable, IEnumerable<SlateDbKeyVal
     public SlateDbKeyValue? Next()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
+        while (true)
         {
-            CSdbKeyValue kv;
-            var result = NativeMethods.slatedb_iterator_next(_iterator, &kv);
-
-            if (result.Error == CSdbError.NotFound)
-            {
-                NativeMethods.slatedb_free_result(result);
+            var native = SlateDbUniffi.Wait(() => Iterator.Next());
+            if (native is null)
                 return null;
-            }
 
-            SlateDbException.CheckResult(result);
-
-            var key = new byte[(int)kv.Key.Len];
-            Marshal.Copy(kv.Key.Data, key, 0, key.Length);
-
-            var value = new byte[(int)kv.Value.Len];
-            Marshal.Copy(kv.Value.Data, value, 0, value.Length);
-
-            NativeMethods.slatedb_free_value(kv.Key);
-            NativeMethods.slatedb_free_value(kv.Value);
-
-            return new SlateDbKeyValue(key, value);
+            if (!SlateDbUniffi.IsExpired(native))
+                return SlateDbUniffi.ToPublic(native);
         }
     }
 
@@ -49,16 +33,7 @@ public sealed class SlateDbScanIterator : IDisposable, IEnumerable<SlateDbKeyVal
     public void Seek(byte[] key)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        unsafe
-        {
-            fixed (byte* keyPtr = key)
-            {
-                var result = NativeMethods.slatedb_iterator_seek(
-                    _iterator, keyPtr, (nuint)key.Length);
-                SlateDbException.CheckResult(result);
-            }
-        }
+        SlateDbUniffi.Wait(() => Iterator.Seek(key));
     }
 
     public void Dispose()
@@ -66,11 +41,8 @@ public sealed class SlateDbScanIterator : IDisposable, IEnumerable<SlateDbKeyVal
         if (_disposed) return;
         _disposed = true;
 
-        if (_iterator != nint.Zero)
-        {
-            NativeMethods.slatedb_iterator_close(_iterator);
-            _iterator = nint.Zero;
-        }
+        _iterator?.Dispose();
+        _iterator = null;
     }
 
     public IEnumerator<SlateDbKeyValue> GetEnumerator()
@@ -78,10 +50,13 @@ public sealed class SlateDbScanIterator : IDisposable, IEnumerable<SlateDbKeyVal
         while (true)
         {
             var kv = Next();
-            if (kv == null) yield break;
+            if (kv is null) yield break;
             yield return kv;
         }
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private NativeDbIterator Iterator =>
+        _iterator ?? throw new ObjectDisposedException(nameof(SlateDbScanIterator));
 }

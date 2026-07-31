@@ -36,6 +36,3 @@ public sealed class SlateDbFixture : IDisposable
         }
     }
 }
-
-[CollectionDefinition("SlateDb")]
-public class SlateDbCollection : ICollectionFixture<SlateDbFixture>;

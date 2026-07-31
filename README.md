@@ -26,23 +26,41 @@ db.Get<int>("score");        // null
 db.Delete("deck");
 ```
 
-See [example project](Pulsy.SlateDB.Example/Program.cs) for full API.
+Typed metrics include counters, gauges, up/down counters, and complete
+histogram snapshots:
+
+```csharp
+using Pulsy.SlateDB.Metrics;
+
+IReadOnlyList<SlateDbMetric> metrics = db.GetMetrics();
+
+var writeOps = db.GetMetric("slatedb.db.write_ops");
+if (writeOps?.Value is SlateDbCounterMetricValue counter)
+    Console.WriteLine(counter.Value);
+
+var requestMetrics = db.GetMetrics("slatedb.object_store.request_duration_seconds");
+```
+
+See the [example project](Pulsy.SlateDB.Example/Program.cs) for the full API.
 
 ## Building from Source
 
-**Prerequisites:** [.NET 9 SDK](https://dotnet.microsoft.com/download), [Rust nightly](https://rustup.rs/), cross-platform: [zig](https://ziglang.org/) + [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild)
+**Prerequisites:** [.NET 10 SDK](https://dotnet.microsoft.com/download), [Rust 1.91.1](https://rustup.rs/), and, for Linux cross-architecture builds, [zig](https://ziglang.org/) with [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild).
 
 ```bash
-./build-native.sh        # current platform
-./build-native.sh --all  # all 6 platforms
+./generate-uniffi-bindings.sh  # regenerate C# from SlateDB's UniFFI metadata
+./build-native.sh              # build the native library for the current platform
+./build-native.sh --all        # build every target supported by the current host
 
 dotnet build Pulsy.SlateDB/Pulsy.SlateDB.csproj
-dotnet test
+dotnet test Pulsy.SlateDB.sln
 ```
+
+Both scripts use SlateDB `v0.15.0` by default. Set `SLATEDB_REF` to build or generate from another tag or commit.
 
 ## Versioning
 
-Tracks [slatedb-c](https://github.com/slatedb/slatedb/tree/main/slatedb-c). 4th segment is for binding-only changes.
+Tracks SlateDB's official [UniFFI binding](https://github.com/slatedb/slatedb/tree/main/bindings/uniffi). The fourth version segment is reserved for .NET binding-only changes.
 
 ## License
 
