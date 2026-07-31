@@ -89,7 +89,7 @@ NATIVE_RID="$(detect_native_rid)"
 # Only Linux cross-architecture builds need zigbuild. macOS and Windows use
 # their platform SDK/toolchain for the other architecture.
 HAS_ZIGBUILD=false
-if "${CARGO[@]}" zigbuild --version &>/dev/null; then
+if "${CARGO[@]}" zigbuild --help &>/dev/null; then
     HAS_ZIGBUILD=true
 fi
 
