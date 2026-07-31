@@ -146,7 +146,7 @@ public sealed class SlateDbBuilder : IDisposable
         _objectStore = null;
     }
 
-    private static SlateDbObjectStoreLocation ResolveObjectStore(
+    internal static SlateDbObjectStoreLocation ResolveObjectStore(
         string path,
         ObjectStoreConfig config)
     {

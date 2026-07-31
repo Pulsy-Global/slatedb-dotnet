@@ -1,6 +1,9 @@
 using Pulsy.SlateDB.Options;
 using NativeDurabilityLevel = uniffi.slatedb.DurabilityLevel;
 using NativeFilterContext = uniffi.slatedb.FilterContext;
+using NativeGarbageCollectorDirectoryOptions = uniffi.slatedb.GarbageCollectorDirectoryOptions;
+using NativeGarbageCollectorOptions = uniffi.slatedb.GarbageCollectorOptions;
+using NativeGarbageCollectorScheduleOptions = uniffi.slatedb.GarbageCollectorScheduleOptions;
 using NativeIterationOrder = uniffi.slatedb.IterationOrder;
 using NativeKeyRange = uniffi.slatedb.KeyRange;
 using NativeKeyValue = uniffi.slatedb.KeyValue;
@@ -108,6 +111,16 @@ internal static class SlateDbUniffi
     internal static NativeWriteOptions ToNative(WriteOptions options) =>
         new(options.AwaitDurable);
 
+    internal static NativeGarbageCollectorOptions ToNative(GarbageCollectorOptions options) => new(
+        ManifestOptions: ToNative(options.ManifestOptions, nameof(options.ManifestOptions)),
+        WalOptions: ToNative(options.WalOptions, nameof(options.WalOptions)),
+        WalFenceOptions: ToNative(options.WalFenceOptions, nameof(options.WalFenceOptions)),
+        CompactedOptions: ToNative(options.CompactedOptions, nameof(options.CompactedOptions)),
+        CompactionsOptions: ToNative(options.CompactionsOptions, nameof(options.CompactionsOptions)),
+        DetachOptions: ToNative(options.DetachOptions),
+        DisableBoundaryFiles: options.BoundaryFilesEnabled == false,
+        ObjectStoreMaxRetries: options.ObjectStoreMaxRetries);
+
     internal static NativePutOptions ToNative(PutOptions options) => new(options.TtlType switch
     {
         TtlType.Default => new NativeTtl.Default(),
@@ -172,6 +185,31 @@ internal static class SlateDbUniffi
 
     private static NativeFilterContext? ToNativeFilterContext(byte[]? payload) =>
         payload is null ? null : new NativeFilterContext.Bytes(payload);
+
+    private static NativeGarbageCollectorDirectoryOptions? ToNative(
+        GcDirectoryOptions? options,
+        string parameterName)
+    {
+        if (options is null)
+            return null;
+
+        if (options.MinAge is not { } minAge)
+            throw new ArgumentException("MinAge must be set for one-shot garbage collection.", parameterName);
+
+        if (options.DryRun is not { } dryRun)
+            throw new ArgumentException("DryRun must be set for one-shot garbage collection.", parameterName);
+
+        return new NativeGarbageCollectorDirectoryOptions(
+            MinAgeMs: ToMilliseconds(minAge),
+            DryRun: dryRun,
+            IntervalMs: options.Interval is { } interval ? ToMilliseconds(interval) : null);
+    }
+
+    private static NativeGarbageCollectorScheduleOptions? ToNative(GcScheduleOptions? options) =>
+        options is null
+            ? null
+            : new NativeGarbageCollectorScheduleOptions(
+                options.Interval is { } interval ? ToMilliseconds(interval) : null);
 
     private static ulong RequirePositive(ulong value, string parameterName) =>
         value > 0
